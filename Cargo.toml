@@ -1,0 +1,16 @@
+[workspace]
+members = [
+    "day1",
+    "day2",
+    "day3",
+]
+
+[patch.crates-io]
+day1 = { path = "day1" }
+day2 = { path = "day2" }
+day3 = { path = "day3" }
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
