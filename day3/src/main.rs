@@ -18,12 +18,6 @@ fn convert_to_decimal(input: &Vec<u8>) -> u32 {
     result
 }
 
-// fn sum_col_at_index(readings: &Vec<String>, col: usize) -> u8 {
-//     let (vals, num_lines) = sum_cols_vertically(readings);
-
-//     if vals[col] as f32 / num_lines as f32 >= 0.5 { 1 } else { 0 }
-// }
-
 fn sum_cols_vertically(readings: &Vec<String>) -> (Vec<i32>, u32) {
     // Make a Vec<i32> and then sum the digits in the whole list, and then if
     // the average is greater than 0.5, use 1, or less than that, and use 0
@@ -61,30 +55,24 @@ fn get_power_level(readings: &Vec<String>) -> u32 {
     gamma_dec * epsilon
 }
 
-fn get_o2_generator_ratings(readings: &Vec<String>) -> u32 {
-    // Keep track of current bit to examine
-    // go through, flat map a length 1 slick at that bit
-    // sum
-    // divide by len of that vec
-    // figure 0 or 1
-    // filter list
-    // if length == 1,
-    //      convert to decimal
-    // if length > 1
-    //      next bit
-    //      loop
+fn get_readings_as_bits(readings: &Vec<String>) -> Vec<Vec<u8>> {
+    readings.iter()
+        .map(|line| line.chars()
+            .map(|c| if c == '1' { 1 } else { 0 })
+            .collect::<Vec<u8>>())
+        .collect()
+}
+
+fn get_generator_rating(readings: &Vec<String>, target_bit_calculator: fn(u32, u32) -> u8) -> u32 {
+    let mut filtered_list = get_readings_as_bits(&readings);
 
     let mut curr_bit = 0;
-    let mut filtered_list  = readings
-        .iter()
-        .map(|line| line.chars().map(|ch| if ch == '1' { 1 } else { 0 }).collect())
-        .collect::<Vec<Vec<u8>>>();
-
     while filtered_list.len() > 1 {
         let sum_vals_in_col = filtered_list
             .iter()
             .fold(0, |acc, vec| acc + (*vec.get(curr_bit).unwrap() as u32));
-        let target_bit: u8 = if sum_vals_in_col as f32 / filtered_list.len() as f32 >= 0.5 { 1 } else { 0 };
+        let target_bit: u8 = target_bit_calculator(sum_vals_in_col, filtered_list.len() as u32);
+        // let target_bit: u8 = if sum_vals_in_col as f32 / filtered_list.len() as f32 >= 0.5 { 1 } else { 0 };
         // I'm stuck here because I can't repeatedly filter into the same variable,
         // because something about "filter" returns references to entries, rather than the entries themselves
         filtered_list = filtered_list
@@ -99,45 +87,18 @@ fn get_o2_generator_ratings(readings: &Vec<String>) -> u32 {
     }
     convert_to_decimal(&filtered_list[0])
 }
+fn get_o2_generator_ratings(readings: &Vec<String>) -> u32 {
+    let target_bit_calculator = |sum_vals_in_col: u32, num_lines: u32| -> u8 {
+        if sum_vals_in_col as f32 / num_lines as f32 >= 0.5 { 1 } else { 0 }
+    };
+    get_generator_rating(&readings, target_bit_calculator)
+}
 
 fn get_co2_generator_ratings(readings: &Vec<String>) -> u32 {
-    // Keep track of current bit to examine
-    // go through, flat map a length 1 slick at that bit
-    // sum
-    // divide by len of that vec
-    // figure 0 or 1
-    // filter list
-    // if length == 1,
-    //      convert to decimal
-    // if length > 1
-    //      next bit
-    //      loop
-
-    let mut curr_bit = 0;
-    let mut filtered_list  = readings
-        .iter()
-        .map(|line| line.chars().map(|ch| if ch == '1' { 1 } else { 0 }).collect())
-        .collect::<Vec<Vec<u8>>>();
-
-    while filtered_list.len() > 1 {
-        let sum_vals_in_col = filtered_list
-            .iter()
-            .fold(0, |acc, vec| acc + (*vec.get(curr_bit).unwrap() as u32));
-        let target_bit: u8 = if sum_vals_in_col as f32 / filtered_list.len() as f32 >= 0.5 { 0 } else { 1 };
-        // I'm stuck here because I can't repeatedly filter into the same variable,
-        // because something about "filter" returns references to entries, rather than the entries themselves
-        filtered_list = filtered_list
-            .iter()
-            .filter(|vec| {
-                (*vec).get(curr_bit).unwrap() == &target_bit
-            })
-            .map(|line| line.clone())
-            .collect::<Vec<Vec<u8>>>();
-
-        curr_bit += 1;
-    }
-    println!("{:?}", filtered_list[0]);
-    convert_to_decimal(&filtered_list[0])
+    let target_bit_calculator = |sum_vals_in_col: u32, num_lines: u32| -> u8 {
+        if sum_vals_in_col as f32 / num_lines as f32 >= 0.5 { 0 } else { 1 }
+    };
+    get_generator_rating(&readings, target_bit_calculator)
 }
 
 #[test]
