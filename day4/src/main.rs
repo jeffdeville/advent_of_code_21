@@ -1,85 +1,119 @@
-fn main() {
-    let file = File::open("day1/input.txt").expect("file not found");
-    let reader = BufReader::new(file);
-    // create a Vec<BingoCard>
-    // read the first line into the deck
-    // then, in a while loop
-    // read the blank
-    // read 5 lines into rows, and make a bingo card
-    //
-}
-
 #[derive(Debug)]
-struct BingoCard {
-    board: Vec<Vec<u128>>,
-    marks: Vec<Vec<bool>>
+struct Board {
+  board: [[(u32, bool); 5]; 5]
 }
 
-impl BingoCard {
-    fn new(rows: Vec<Vec<u128>>) -> BingoCard {
-        // questioning whether there's a way to initialize this
-        // value and then lock it. But don't worry about it
+impl Board {
+  fn new(numbers: &[u32]) -> Self {
+    let mut board = Self {
+      board: [[(0, false); 5]; 5]
+    };
 
-        BingoCard {
-            board: rows,
-            marks: vec![vec![false; 5]; 5]
-        }
+    for i in 0..5 {
+      for j in 0..5 {
+        board.board[i][j] = (numbers[i*5+j], false);
+      }
     }
 
-    fn play_round(&mut self, target: u128) -> () {
-        for row in 0..5 {
-            for col in 0..5 {
-                if self.board[row][col] == target {
-                    self.marks[row][col] = true;
-                }
-            }
+    board
+  }
+  fn mark_num(&mut self, num: u32) {
+    for i in 0..5 {
+      for j in 0..5 {
+        if self.board[i][j].0 == num {
+          self.board[i][j].1 = true;
         }
+      }
     }
+  }
 
-    fn is_bingo(&self) -> bool {
-        for dim1 in 0..5 {
-            if self.marks[dim1] == vec![true, true, true, true, true] {
-                return true;
-            }
-            // because this grid is square, I can do this:
-            if self.marks.iter().map(|row| row[dim1]).fold(true, |acc, val| acc & val) == true {
-                return true;
-            }
+  fn is_bingo(&self) -> bool {
+    for i in 0..5 {
+      if (0..5).all(|j| self.board[i][j].1) {
+        return true;
+      }
+      if (0..5).all(|j| self.board[j][i].1) {
+        return true;
+      }
+    }
+    false
+  }
+
+  fn sum_unmarked(&self) -> u32 {
+    let mut sum: u32 = 0;
+    for i in 0..5 {
+      for j in 0..5 {
+        if !self.board[i][j].1 {
+          sum += self.board[i][j].0;
         }
-
-        false
+      }
     }
+    sum
+  }
 }
 
-#[test]
-fn test_bingo_mechanics() {
-    let rows = vec![
-        vec![22, 13, 17, 11,  0],
-        vec![8,  2, 23,  4, 24],
-        vec![21, 9, 14, 16,  7],
-        vec![6, 10, 3, 18,  5],
-        vec![1, 12, 20, 15, 19],
-    ];
-    let mut bingo = BingoCard::new(rows.clone());
-    assert!(!bingo.is_bingo());
+fn create_boards(boards: &str) -> Vec<Board> {
+  let mut board_vec = boards
+    .split("\n\n")
+    .map(|board_lines| {
+      let board_nums: Vec<u32> = board_lines
+        .split_ascii_whitespace()
+        .flat_map(|x| {
+          x
+            .split(" ")
+            .map(|x| x.parse::<u32>().unwrap())
+            .collect::<Vec<u32>>()
+        })
+        .collect();
+      Board::new(&board_nums)
+    })
+    .collect();
+    board_vec
+}
 
-    // bingo horizontally
-    bingo.play_round(23);
-    bingo.play_round(4);
-    bingo.play_round(24);
-    bingo.play_round(2);
-    bingo.play_round(8);
+fn main() {
+  let (nums, boards) = include_str!("../input.txt").split_once("\n\n").unwrap();
+  let mut bingo_boards: Vec<Board> = create_boards(boards);
 
-    assert!(bingo.is_bingo());
+  let parsed_nums = nums
+    .split(",")
+    .map(|x| x.parse::<u32>().unwrap())
+    .collect::<Vec<u32>>();
+  part_a(&parsed_nums, bingo_boards);
 
-    let mut bingo = BingoCard::new(rows.clone());
-    assert!(!bingo.is_bingo());
-    // bingo vertically
-    bingo.play_round(11);
-    bingo.play_round(4);
-    bingo.play_round(16);
-    bingo.play_round(18);
-    bingo.play_round(15);
+  let mut bingo_boards: Vec<Board> = create_boards(boards);
+  part_b(&parsed_nums, bingo_boards);
+}
 
-    assert!(bingo.is_bingo());
+fn part_a(parsed_nums: &Vec<u32>, mut bingo_boards: Vec<Board>) {
+  for num in parsed_nums {
+    bingo_boards.iter_mut().for_each(|board| {
+      board.mark_num(*num);
+    });
+    let board = bingo_boards.iter().find(|board| board.is_bingo());
+    if let Some(winner) = board {
+      println!("BINGO!!! {:?}: \n\n{}", winner, winner.sum_unmarked() * num);
+      break;
+    }
+  }
+}
+
+fn part_b(parsed_nums: &Vec<u32>, mut bingo_boards: Vec<Board>) {
+
+  for num in parsed_nums {
+    let not_won_yet: Vec<usize> = bingo_boards
+      .iter()
+      .enumerate()
+      .filter_map(|(i, board)| if board.is_bingo() { None } else {Some(i) })
+      .collect();
+    bingo_boards.iter_mut().for_each(|board| { board.mark_num(*num) });
+
+    if bingo_boards.iter().filter(|board| !board.is_bingo()).count() == 0 {
+      let pos = not_won_yet[0];
+      let score = num * bingo_boards[pos].sum_unmarked();
+      println!("BINGO!!! {:?}: \n\n{}", bingo_boards[pos], score);
+      break;
+    }
+
+  }
 }
