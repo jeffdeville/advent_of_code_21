@@ -22,32 +22,23 @@ fn count_num_deepers(input: &Vec<i32>, window_size: usize) -> u32
     })
 }
 
-    #[test]
-    fn test_count_num_deepers_with_window_2() {
-        let input = vec![1, 2, 3];
-        assert_eq!(count_num_deepers(&input, 2), 2);
+#[test]
+fn test_count_num_deepers_with_window_2() {
+    let input = vec![1, 2, 3];
+    assert_eq!(count_num_deepers(&input, 2), 2);
 
-        let input = vec![3, 2, 1];
-        assert_eq!(count_num_deepers(&input, 2), 0);
+    let input = vec![3, 2, 1];
+    assert_eq!(count_num_deepers(&input, 2), 0);
 
-        let input = vec![3, 3, 3];
-        assert_eq!(count_num_deepers(&input, 2), 0);
+    let input = vec![3, 3, 3];
+    assert_eq!(count_num_deepers(&input, 2), 0);
 
-        let input = vec![3, 2, 3, 4, 5];
-        assert_eq!(count_num_deepers(&input, 2), 3);
-    }
+    let input = vec![3, 2, 3, 4, 5];
+    assert_eq!(count_num_deepers(&input, 2), 3);
+}
 
 #[test]
 fn test_count_num_deepers_with_window_4() {
-    // let input = vec![1, 2, 3, 4];
-    // assert_eq!(count_num_deepers(input, 4), 1);
-
-    // let input = vec![3, 2, 1, 0, 1, 2, 3];
-    // assert_eq!(count_num_deepers(input, 4), 2);
-
-    // let input = vec![0, 0, 1, 1, 2, 0, 0];
-    // assert_eq!(count_num_deepers(input, 4), 2);
-
     let input = vec![
         199,
         200,
