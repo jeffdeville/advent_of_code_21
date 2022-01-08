@@ -100,9 +100,12 @@ impl Wordle {
         let mut score_map = HashMap::new();
         for (i, c) in guess.chars().enumerate() {
             let score = score_map.entry(c).or_insert(0);
+            // bias against guessing words with duplicate letters
             if *score <= self.letter_vals[&c][i] {
                 *score = self.letter_vals[&c][i] + (*score as f32 / 2 as f32) as u32;
             } else if *score >= 45 && self.letter_vals[&c][i] == 45{
+                // but don't bias them if it's known that the letters are all
+                // in the right spot
                 *score += 45;
             }
             // if guess == "hollo" {
@@ -137,9 +140,6 @@ impl Wordle {
             .for_each(|(i, elem)| {
                 let scores = self.letter_vals.get_mut(&elem).unwrap();
                 if target_chars[i] == elem {
-                    // go through scoring. If the value is below 25, raise it to 25
-                    // but set the matched value to 45. This way, letters in the
-                    // word twice can't be downgraded below 25
                     for score_i in 0..scores.len() {
                         if score_i == i {
                             scores[score_i] = 45;
