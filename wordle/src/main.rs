@@ -5,11 +5,20 @@ fn main() {
     let lines = include_str!("../words.txt").to_string();
     let dict = lines.split("\n").map(|x| x.trim()).collect::<Vec<&str>>();
     let dict_copy = dict.clone();
+
+    let solution_lines = include_str!("../wordlist_solutions.txt").to_string();
+    let solution_dict = solution_lines.split("\n").map(|x| x.trim()).collect::<Vec<&str>>();
+
+    // let solution_dict = vec!["fixer"];
+    // let solution_dict = vec!["fjord", "jaunt", "dozen", "boozy", "fixer"];
     let mut guesses_required: Vec<u32> = Vec::new();
-    let total_rounds=100;
-    for current_round in 0..total_rounds {
+    for current_round in 0..solution_dict.len() {
         let mut wordle = Wordle::new(dict.clone());
-        println!("Round {} Target: {}", current_round, wordle.target);
+        // wordle.set_target("sissy");
+        wordle.set_target(solution_dict[current_round]);
+
+        // print!(".");
+        // println!("Round {} Target: {}", current_round, wordle.target);
         loop {
             let mut guess: String = String::new();
             let mut best_score = 0;
@@ -21,16 +30,19 @@ fn main() {
                 }
             });
 
-            println!("\t{} - Guess: {} Score: {}", wordle.num_guesses, &guess, wordle.score(&guess));
+            // println!("\t{} - Guess: {} Score: {}", wordle.num_guesses, &guess, wordle.score(&guess));
             match &wordle.guess(&guess) {
                 Some(guess) => {
-                    println!("Success! {} in {} tries", guess, wordle.num_guesses);
+                    if wordle.num_guesses > 6 {
+                        print!("\"{}\",", guess);
+                    }
                     guesses_required.push(wordle.num_guesses as u32);
                     break;
                 },
                 None => {
-                    if wordle.num_guesses > 20 {
-                        println!("GIVING UP");
+                    if wordle.num_guesses > 10 {
+                        println!("GIVING UP on {} !!!!!!!!!!!!!!!!", wordle.target);
+                        println!("{:?}", wordle.letter_vals);
                         break;
                     }
 
@@ -39,7 +51,7 @@ fn main() {
         }
     }
     let total_guesses = guesses_required.iter().sum::<u32>();
-    println!("Avg Guesses: {}", total_guesses as f32 / total_rounds as f32);
+    println!("Avg Guesses: {}", total_guesses as f32 / solution_dict.len() as f32);
 }
 
 #[derive(Debug)]
@@ -96,23 +108,49 @@ impl Wordle {
         self.target = target.to_string();
     }
 
+    fn been_guessed(&self, char: &char) -> bool {
+        self.letter_vals[char].iter().all(|x| {
+            x > &10 || x == &0
+        })
+    }
     fn score(&self, guess: &str) -> u32 {
         let mut score_map = HashMap::new();
         for (i, c) in guess.chars().enumerate() {
             let score = score_map.entry(c).or_insert(0);
-            // bias against guessing words with duplicate letters
-            if *score <= self.letter_vals[&c][i] {
-                *score = self.letter_vals[&c][i] + (*score as f32 / 2 as f32) as u32;
-            } else if *score >= 45 && self.letter_vals[&c][i] == 45{
-                // but don't bias them if it's known that the letters are all
-                // in the right spot
-                *score += 45;
+            // if a letter has not been guessed, then only award value for its first occurrence
+            if !self.been_guessed(&c) && score == &0 {
+                *score = self.letter_vals[&c][i];
+            } else {
+                // this char has been guessed before
+                if self.letter_vals[&c][i] == 45 {
+                    *score += 45;
+                } else {
+                    let new_score = (self.letter_vals[&c][i] as f32 / 2.0).round() as u32;
+                    *score += new_score;
+                }
             }
-            // if guess == "hollo" {
-            //     println!("{} {} {} {}", c, i, score, self.letter_vals[&c][i]);
+            // bias against guessing words with duplicate letters
+
+            // if self.letter_vals[&c][i] == 45 {
+            //     *score += 45;
+            // } else {
+            //     let new_score = (self.letter_vals[&c][i] as f32 / 2.0).round() as u32;
+            //     *score += new_score;
+            // }
+
+            // if *score <= self.letter_vals[&c][i] {
+            //     *score = self.letter_vals[&c][i] + (*score as f32 / 2 as f32) as u32;
+            // }
+            // else if *score >= 45 && self.letter_vals[&c][i] == 45{
+            //     // but don't bias them if it's known that the letters are all
+            //     // in the right spot
+            //     *score += 45;
+            // }
+            // if guess == self.target {
+            //     println!("Char: {} Index: {} Total Score:{} Char Score at Ind:{}", c, i, score, self.letter_vals[&c][i]);
             // }
         }
-        // if guess == "hollo" {
+        // if guess == self.target {
         //     println!("Total: {:?} {}", score_map, score_map.values().fold(0, |acc, score| acc + score));
         // }
         score_map.values().fold(0, |acc, score| acc + score)
@@ -137,25 +175,27 @@ impl Wordle {
         guess
             .chars()
             .enumerate()
-            .for_each(|(i, elem)| {
-                let scores = self.letter_vals.get_mut(&elem).unwrap();
-                if target_chars[i] == elem {
-                    for score_i in 0..scores.len() {
-                        if score_i == i {
-                            scores[score_i] = 45;
-                        } else if scores[score_i] < 25 && scores[score_i] > 0 {
-                            scores[score_i] = 25;
+            .for_each(|(guess_index, guess_char)| {
+                let scores = self.letter_vals.get_mut(&guess_char).unwrap();
+                if target_chars[guess_index] == guess_char {
+                    for letter_scores_index in 0..scores.len() {
+                        if letter_scores_index == guess_index {
+                            scores[letter_scores_index] = 45;
+                        } else if scores[letter_scores_index] < 25 && scores[letter_scores_index] > 0 {
+                            scores[letter_scores_index] = 25;
                         }
                     }
-                } else if target_chars.contains(&elem) {
-                    for score_i in 0..scores.len() {
-                        if score_i == i {
-                            scores[score_i] = 0;
-                        } else if scores[score_i] < 25 && scores[score_i] > 0 {
-                            scores[score_i] = 25;
+                } else if target_chars.contains(&guess_char) {
+                    for letter_scores_index in 0..scores.len() {
+                        if letter_scores_index == guess_index {
+                            // println!("UPDATE SCORING - guess_char: {} guess_index{} this score:{}", guess_char, guess_index, scores[letter_scores_index]);
+                            scores[letter_scores_index] = 0;
+                        } else if scores[letter_scores_index] < 25 && scores[letter_scores_index] > 0 {
+                            scores[letter_scores_index] = 25;
                         }
                     }
                 } else {
+                    // clear out the score entirely
                     *scores = vec![0; 5];
                 }
             });
