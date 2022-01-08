@@ -105,9 +105,6 @@ impl Wordle {
             } else if *score >= 45 && self.letter_vals[&c][i] == 45{
                 *score += 45;
             }
-            // else if *score == self.letter_vals[&c][i] {
-            //     *score = (*score as f32 / 2 as f32) as u32;
-            // }
             // if guess == "hollo" {
             //     println!("{} {} {} {}", c, i, score, self.letter_vals[&c][i]);
             // }
@@ -162,7 +159,6 @@ impl Wordle {
                     *scores = vec![0; 5];
                 }
             });
-        // println!("{:?}", self.letter_vals);
     }
 
 }
@@ -170,7 +166,7 @@ impl Wordle {
 #[test]
 fn test_score_correct_word() {
     let wordle = Wordle::new(vec!["hello"]);
-    assert_eq!(wordle.score("hello"), 43);
+    assert_eq!(wordle.score("hello"), 38);
 }
 
 #[test]
@@ -212,11 +208,11 @@ fn test_score_a_round() {
     let mut wordle = Wordle::new(vec!["hello", "pizza", "world", "jello"]);
     wordle.set_target("hello");
     assert_eq!(wordle.score("world"), 38);
-    assert_eq!(wordle.score("jello"), 41);
+    assert_eq!(wordle.score("jello"), 36);
     assert_eq!(wordle.guess("world"), None);
-    assert_eq!(wordle.score("jello"), 106);
+    assert_eq!(wordle.score("jello"), 93);
     assert_eq!(wordle.guess("jello"), None);
-    assert_eq!(wordle.score("jello"), 180);
+    assert_eq!(wordle.score("jello"), 157);
 
 }
 
