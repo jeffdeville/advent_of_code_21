@@ -5,27 +5,41 @@ fn main() {
     let lines = include_str!("../words.txt").to_string();
     let dict = lines.split("\n").map(|x| x.trim()).collect::<Vec<&str>>();
     let dict_copy = dict.clone();
-    let mut wordle = Wordle::new(dict);
-    wordle.set_target("crank");
-    loop {
-        let guess = dict_copy.iter().max_by(|a, b| {
-            let a_score = wordle.score(a);
-            let b_score = wordle.score(b);
-            a_score.cmp(&b_score)
+    let mut guesses_required: Vec<u32> = Vec::new();
+    let total_rounds=100;
+    for current_round in 0..total_rounds {
+        let mut wordle = Wordle::new(dict.clone());
+        println!("Round {} Target: {}", current_round, wordle.target);
+        loop {
+            let mut guess: String = String::new();
+            let mut best_score = 0;
+            dict_copy.iter().for_each(|&word| {
+                let new_score = wordle.score(word);
+                if new_score > best_score {
+                    guess = word.to_string();
+                    best_score = new_score;
+                }
+            });
 
-        }).unwrap();
+            println!("\t{} - Guess: {} Score: {}", wordle.num_guesses, &guess, wordle.score(&guess));
+            match &wordle.guess(&guess) {
+                Some(guess) => {
+                    println!("Success! {} in {} tries", guess, wordle.num_guesses);
+                    guesses_required.push(wordle.num_guesses as u32);
+                    break;
+                },
+                None => {
+                    if wordle.num_guesses > 20 {
+                        println!("GIVING UP");
+                        break;
+                    }
 
-
-        match &wordle.guess(guess) {
-            Some(guess) => {
-                println!("Success! {} in {} tries", guess, wordle.num_guesses);
-                break;
-            },
-            None => {
-                println!("Guess: {}", &guess);
+                }
             }
         }
     }
+    let total_guesses = guesses_required.iter().sum::<u32>();
+    println!("Avg Guesses: {}", total_guesses as f32 / total_rounds as f32);
 }
 
 #[derive(Debug)]
@@ -84,16 +98,23 @@ impl Wordle {
 
     fn score(&self, guess: &str) -> u32 {
         let mut score_map = HashMap::new();
-
         for (i, c) in guess.chars().enumerate() {
             let score = score_map.entry(c).or_insert(0);
-            if *score < self.letter_vals[&c][i] {
-                *score = self.letter_vals[&c][i];
+            if *score <= self.letter_vals[&c][i] {
+                *score = self.letter_vals[&c][i] + (*score as f32 / 2 as f32) as u32;
             } else if *score >= 45 && self.letter_vals[&c][i] == 45{
                 *score += 45;
             }
+            // else if *score == self.letter_vals[&c][i] {
+            //     *score = (*score as f32 / 2 as f32) as u32;
+            // }
+            // if guess == "hollo" {
+            //     println!("{} {} {} {}", c, i, score, self.letter_vals[&c][i]);
+            // }
         }
-
+        // if guess == "hollo" {
+        //     println!("Total: {:?} {}", score_map, score_map.values().fold(0, |acc, score| acc + score));
+        // }
         score_map.values().fold(0, |acc, score| acc + score)
     }
 
