@@ -13,13 +13,13 @@ fn main() {
 
     let mut guesses_required: Vec<u32> = Vec::new();
     for current_round in 0..solution_dict.len() {
-        let mut wordle = Wordle::new(dict.clone());
+        let mut wordle = WordleMaster::new(dict.clone());
         wordle.set_target(solution_dict[current_round]);
         if current_round % 50 == 1 {
             println!("Current Average after {} rounds: {}", current_round + 1, guesses_required.iter().sum::<u32>() as f32 / guesses_required.len() as f32);
         }
         loop {
-            // for each CPU, split the dictionary into equal sizes, and then score them.
+            // for each CPU, split the dictionary into equal sizes, and then score them. - This would require sharing the scoring stuff though.
             let mut guess: String = String::new();
             let mut best_score = 0;
             dict_copy.iter().for_each(|&word| {
@@ -42,7 +42,7 @@ fn main() {
                 None => {
                     if wordle.num_guesses > 10 {
                         println!("GIVING UP on {} !!!!!!!!!!!!!!!!", wordle.target);
-                        println!("{:?}", wordle.letter_vals);
+                        // println!("{:?}", wordle.letter_vals);
                         break;
                     }
 
@@ -55,16 +55,17 @@ fn main() {
 }
 
 #[derive(Debug)]
-struct Wordle {
+struct WordleMaster {
     target: String,
     dict: Vec<String>,
     guesses: Vec<String>,
-    num_guesses: usize,
+    num_guesses: u32,
+    workers: Vec<WordleSlave>,
     letter_vals: HashMap<char, Vec<u32>>,
     been_guessed: HashMap<char, bool>,
 }
 
-impl Wordle {
+impl WordleMaster {
     fn new(dict: Vec<&str>) -> Self {
         let mut rng = rand::thread_rng();
         let target = dict[rng.gen_range(0..dict.len())].to_string();
@@ -99,22 +100,64 @@ impl Wordle {
         let mut been_guessed: HashMap<char, bool> = HashMap::new();
 
         Self {
-           target: target,
-           guesses: Vec::new(),
-           dict: dict.iter().map(|x| x.to_string()).collect(),
-           num_guesses: 0,
-           letter_vals: letter_vals,
-           been_guessed: been_guessed,
-       }
+            target, letter_vals, been_guessed,
+            guesses: Vec::new(),
+            dict: dict.iter().map(|x| x.to_string()).collect(),
+            num_guesses: 0,
+            workers: Vec::new(),
+        }
+    }
+
+    fn set_target(&mut self, target: &str) {
+        self.target = target.to_string();
+        // just assumes this is only ever done once. Terrible
+        self.workers.push(
+            WordleSlave::new(&self.target, self.dict.clone(), self.letter_vals.clone(), self.been_guessed.clone())
+        );
+    }
+
+    fn guess(&mut self, guess: &str) -> Option<String> {
+        if !self.dict.contains(&guess.to_string()){
+            return None;
+        }
+        self.num_guesses += 1;
+        for worker in self.workers.iter_mut() {
+            if worker.guess(guess).is_some() { return Some(guess.to_string()) }
+        }
+        None
+    }
+
+    fn score(&self, guess: &str) -> u32 {
+        self.workers.first().unwrap().score(guess)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct WordleSlave {
+    target: String,
+    dict: Vec<String>,
+    letter_vals: HashMap<char, Vec<u32>>,
+    been_guessed: HashMap<char, bool>,
+}
+
+impl WordleSlave {
+    fn new(target: &str, dict: Vec<String>, letter_vals: HashMap<char, Vec<u32>>, been_guessed: HashMap<char, bool>) -> Self {
+        Self {
+            target: target.to_string(),
+            dict: dict,
+            letter_vals: letter_vals,
+            been_guessed: been_guessed,
+        }
+    }
+
+    fn been_guessed(&self, char: &char) -> bool {
+        *self.been_guessed.get(char).unwrap_or(&false)
     }
 
     fn set_target(&mut self, target: &str) {
         self.target = target.to_string();
     }
 
-    fn been_guessed(&self, char: &char) -> bool {
-        *self.been_guessed.get(char).unwrap_or(&false)
-    }
     fn score(&self, guess: &str) -> u32 {
         let mut score_map = HashMap::new();
         for (i, c) in guess.chars().enumerate() {
@@ -147,11 +190,8 @@ impl Wordle {
     }
 
     fn guess(&mut self, guess: &str) -> Option<String> {
-        // if !self.dict.contains(&guess.to_string()){
-        //     return None;
-        // }
         // println!("{}: {}", guess, self.score(guess));
-        self.num_guesses += 1;
+        // self.num_guesses += 1;
         if self.target == guess {
             Some(guess.to_string())
         } else {
@@ -198,25 +238,26 @@ impl Wordle {
                 }
             });
     }
-
 }
 
 #[test]
 fn test_score_correct_word() {
-    let wordle = Wordle::new(vec!["hello"]);
+    let mut wordle = WordleMaster::new(vec!["hello"]);
+    wordle.set_target("hello");
     assert_eq!(wordle.score("hello"), 38);
 }
 
 #[test]
 fn test_guess_correct_word() {
-    let mut wordle = Wordle::new(vec!["hello"]);
+    let mut wordle = WordleMaster::new(vec!["hello"]);
+    wordle.set_target("hello");
     assert_eq!(wordle.guess("hello"), Some("hello".to_string()));
     assert_eq!(wordle.num_guesses, 1);
 }
 
 #[test]
 fn test_guess_incorrect_word() {
-    let mut wordle = Wordle::new(vec!["hello", "world"]);
+    let mut wordle = WordleMaster::new(vec!["hello", "world"]);
     wordle.set_target("hello");
     assert_eq!(wordle.guess("world"), None);
     assert_eq!(wordle.num_guesses, 1);
@@ -224,7 +265,7 @@ fn test_guess_incorrect_word() {
 
 #[test]
 fn test_score_duplicate_guess() {
-    let mut wordle = Wordle::new(vec!["hello", "pizza"]);
+    let mut wordle = WordleMaster::new(vec!["hello", "pizza"]);
     wordle.set_target("hello");
     assert_eq!(wordle.guess("pizza"), None);
     assert_eq!(wordle.num_guesses, 1);
@@ -235,7 +276,8 @@ fn test_score_duplicate_guess() {
 
 #[test]
 fn test_score_does_nothing_for_words_not_in_dict() {
-    let mut wordle = Wordle::new(vec!["hello"]);
+    let mut wordle = WordleMaster::new(vec!["hello"]);
+    wordle.set_target("hello");
     assert_eq!(wordle.num_guesses, 0);
     assert_eq!(wordle.guess("not in dict"), None);
     assert_eq!(wordle.num_guesses, 0);
@@ -243,14 +285,14 @@ fn test_score_does_nothing_for_words_not_in_dict() {
 
 #[test]
 fn test_score_a_round() {
-    let mut wordle = Wordle::new(vec!["hello", "pizza", "world", "jello"]);
+    let mut wordle = WordleMaster::new(vec!["hello", "pizza", "world", "jello"]);
     wordle.set_target("hello");
     assert_eq!(wordle.score("world"), 38);
     assert_eq!(wordle.score("jello"), 36);
     assert_eq!(wordle.guess("world"), None);
-    assert_eq!(wordle.score("jello"), 93);
+    assert_eq!(wordle.score("jello"), 86);
     assert_eq!(wordle.guess("jello"), None);
-    assert_eq!(wordle.score("jello"), 157);
+    assert_eq!(wordle.score("jello"), 180);
 
 }
 
