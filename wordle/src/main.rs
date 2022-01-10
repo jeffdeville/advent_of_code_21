@@ -15,18 +15,14 @@ fn setup_logging() -> (Sender<String>, JoinHandle<()>) {
 }
 
 fn main() {
-    let lines = include_str!("../words.txt").to_string();
-    let dict = lines.split("\n").map(|x| x.trim()).collect::<Vec<&str>>();
-    let dict_copy = dict.clone();
     let solution_lines = include_str!("../wordlist_solutions.txt").to_string();
     let solution_dict = solution_lines.split("\n").map(|x| x.trim()).collect::<Vec<&str>>();
 
     let (tx, logger_handle) = setup_logging();
-    tx.send("Here Is A Message".to_string()).unwrap();
 
     let mut guesses_required: Vec<u32> = Vec::new();
     for current_round in 0..solution_dict.len() {
-        let mut wordle = WordleMaster::new(dict.clone());
+        let mut wordle = WordleMaster::new();
         let tx_logger = tx.clone();
         wordle.run(solution_dict[current_round], tx_logger);
     }

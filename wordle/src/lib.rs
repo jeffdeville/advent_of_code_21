@@ -1,12 +1,10 @@
 use hashbrown::HashMap;
 use std::sync::mpsc;
 use std::sync::mpsc::{Sender, Receiver};
-use std::thread::{self, JoinHandle};
+use std::thread;
 
 #[derive(Debug)]
 pub struct WordleMaster {
-    target: String,
-    // dict: Vec<String>,
     guesses: Vec<String>,
     pub num_guesses: u32,
     workers: Vec<WordleSlave>,
@@ -18,19 +16,7 @@ static GUESS_WORDS: &str = include_str!("../words.txt");
 static SOLN_WORDS: &str = include_str!("../wordlist_solutions.txt");
 
 impl WordleMaster {
-    #[inline]
-    pub fn GUESS_WORDS() -> Vec<&'static str> {
-        GUESS_WORDS.split("\n").map(|x| x.trim()).collect::<Vec<&str>>()
-    }
-
-    #[inline]
-    pub fn SOLN_WORDS() -> Vec<&'static str> {
-        SOLN_WORDS.split("\n").map(|x| x.trim()).collect::<Vec<&str>>()
-    }
-
-    pub fn new(dict: Vec<&str>) -> Self {
-        // let mut rng = rand::thread_rng();
-        // let target = dict[rng.gen_range(0..dict.len())].to_string();
+    pub fn new() -> Self {
         let mut letter_vals = HashMap::new();
         letter_vals.insert('a',vec![10; 5]);
         letter_vals.insert('b',vec![3; 5]);
@@ -59,25 +45,27 @@ impl WordleMaster {
         letter_vals.insert('y',vec![3; 5]);
         letter_vals.insert('z',vec![1; 5]);
 
-        let mut been_guessed: HashMap<char, bool> = HashMap::new();
+        let been_guessed: HashMap<char, bool> = HashMap::new();
 
         Self {
-            target: "".to_string(),
             letter_vals, been_guessed,
             guesses: Vec::new(),
-            // dict: dict.iter().map(|x| x.to_string()).collect(),
             num_guesses: 0,
             workers: Vec::new(),
         }
     }
 
+    #[inline]
+    pub fn GUESS_WORDS() -> Vec<&'static str> {
+        GUESS_WORDS.split("\n").map(|x| x.trim()).collect::<Vec<&str>>()
+    }
+
     pub fn run(&mut self, target: &str, tx_logger: Sender<String>) {
-        let (tx_guess, rx_guess): (Sender<(String, u32)>, Receiver<(String, u32)>) = mpsc::channel();
         let num_threads = 4;
         let chunk_size = GUESS_WORDS.split("\n").count() / num_threads;
-
+        println!("Target Word: {}", target);
         loop {
-            tx_logger.send("looping".to_string()).unwrap();
+            let (tx_guess, rx_guess): (Sender<(String, u32)>, Receiver<(String, u32)>) = mpsc::channel();
 
             GUESS_WORDS
             .split("\n")
@@ -99,122 +87,34 @@ impl WordleMaster {
                 })
                 .for_each(|handle| handle.join().unwrap());
 
-            let (guess, score) = rx_guess
+            drop(tx_guess);
+            let (guess, _score) = rx_guess
                 .iter()
                 .max_by(|(_, score1), (_, score2)| score1.cmp(score2))
                 .unwrap();
 
+            // println!("Best guess: {} with score {}", guess, score);
 
-            match self.guess(&guess) {
-                Some(guess) => {
-                    if self.num_guesses > 6 {
-                        println!("{}  {}", guess, self.num_guesses);
-                    }
-                    // guesses_required.push(self.num_guesses as u32);
-                    break;
-                },
-                None => {
-                    // Should be an event fired by lib.rs and just logged here
-                    // if self.num_guesses > 10 {
-                    //     println!("GIVING UP on {} !!!!!!!!!!!!!!!!", self.target);
-                    //     // println!("{:?}", self.letter_vals);
-                    //     break;
-                    // }
-
-                }
-            }
-
-
+            if self.guess(target, &guess).is_some() { break }
         }
     }
 
-    pub fn guess(&mut self, guess: &str) -> Option<String> {
-        if !WordleMaster::SOLN_WORDS().contains(&guess) {
+    pub fn guess(&mut self, target: &str, guess: &str) -> Option<String> {
+        if !WordleMaster::GUESS_WORDS().contains(&guess) {
+            println!("Hmmm... {}", guess);
+
             return None;
         }
+        self.num_guesses += 1;
 
+        println!("Target: {}, Guess: {}, GuessNum: {}", target, guess, self.num_guesses);
+        if target == guess {
+            println!("    {}", self.num_guesses);
+            return Some(guess.to_string());
+        }
+        self.update_scoring(target, guess);
         None
     }
-}
-
-#[derive(Debug, Clone)]
-struct WordleSlave {
-    target: String,
-    dict: Vec<&'static str>,
-    letter_vals: HashMap<char, Vec<u32>>,
-    been_guessed: HashMap<char, bool>,
-    logger: Sender<String>,
-    guesser: Sender<(String, u32)>,
-}
-
-impl WordleSlave {
-    fn new(target: String, dict: Vec<&'static str>, letter_vals: HashMap<char, Vec<u32>>, been_guessed: HashMap<char, bool>, logger: Sender<String>, guesser: Sender<(String, u32)>) -> Self {
-        Self {
-            target, dict, letter_vals, been_guessed, logger, guesser,
-        }
-    }
-
-    fn been_guessed(&self, char: &char) -> bool {
-        *self.been_guessed.get(char).unwrap_or(&false)
-    }
-
-    fn run(&self) -> () {
-        let mut best_score = 0;
-        let mut guess: String = String::new();
-        println!("Thread Stuff: {:?}", self.letter_vals);
-        for word in self.dict.iter() {
-            let new_score = self.score(word);
-            if new_score > best_score {
-                guess = word.to_string();
-                best_score = new_score;
-            }
-        }
-        self.logger.send(format!("Thread finished: {}, {}", guess, best_score)).unwrap();
-        self.guesser.send((guess, best_score)).unwrap();
-    }
-
-    fn score(&self, guess: &str) -> u32 {
-        let mut score_map = HashMap::new();
-        for (i, c) in guess.chars().enumerate() {
-            let score = score_map.entry(c).or_insert(0);
-            // if a letter has not been guessed, then only award value for its first occurrence
-            if !self.been_guessed(&c) && score == &0 {
-                println!("checking: {} of {}", c, guess);
-                *score = self.letter_vals[&c][i];
-            } else {
-                // this char has been guessed before
-                if self.letter_vals[&c][i] == 45 {
-                    *score += 45;
-                } else if *score > 0 {
-                    let new_score = (self.letter_vals[&c][i] as f32 / 2.0).round() as u32;
-                    *score += new_score;
-                } else {
-                    *score = self.letter_vals[&c][i];
-                }
-            }
-
-            // if guess == self.target {
-            //     println!("Char: {} Index: {} Total Score:{} Char Score at Ind:{}", c, i, score, self.letter_vals[&c][i]);
-            // }
-        }
-        // if guess == self.target {
-        //     println!("{:?}", self.letter_vals);
-        //     println!("Total: {:?} {}", score_map, score_map.values().fold(0, |acc, score| acc + score));
-
-        // }
-        score_map.values().fold(0, |acc, score| acc + score)
-    }
-
-    // fn guess(&mut self, guess: &str) -> Option<String> {
-    //     // println!("{}: {}", guess, self.score(guess));
-    //     // self.num_guesses += 1;
-    //     if self.target == guess {
-    //         Some(guess.to_string())
-    //     } else {
-    //         self.update_scoring(guess);
-    //         None
-    //     }
-    // }
 
     fn set_guessed(&mut self, char: &char) {
         if !self.been_guessed.contains_key(char) {
@@ -222,8 +122,8 @@ impl WordleSlave {
         }
     }
 
-    fn update_scoring(&mut self, guess: &str) {
-        let target_chars = self.target.chars().collect::<Vec<char>>();
+    fn update_scoring(&mut self, target: &str, guess: &str) {
+        let target_chars = target.chars().collect::<Vec<char>>();
         // update scoring
         guess
             .chars()
@@ -253,5 +153,65 @@ impl WordleSlave {
                     *scores = vec![0; 5];
                 }
             });
+    }
+}
+
+#[derive(Debug, Clone)]
+struct WordleSlave {
+    target: String,
+    dict: Vec<&'static str>,
+    letter_vals: HashMap<char, Vec<u32>>,
+    been_guessed: HashMap<char, bool>,
+    logger: Sender<String>,
+    guesser: Sender<(String, u32)>,
+}
+
+impl WordleSlave {
+    fn new(target: String, dict: Vec<&'static str>, letter_vals: HashMap<char, Vec<u32>>, been_guessed: HashMap<char, bool>, logger: Sender<String>, guesser: Sender<(String, u32)>) -> Self {
+
+        Self {
+            target, dict, letter_vals, been_guessed, logger, guesser,
+        }
+    }
+
+    fn been_guessed(&self, char: &char) -> bool {
+        *self.been_guessed.get(char).unwrap_or(&false)
+    }
+
+    fn run(&self) -> () {
+        let mut best_score = 0;
+        let mut guess: String = String::new();
+        for word in self.dict.iter() {
+            let new_score = self.score(word);
+            if new_score > best_score {
+                guess = word.to_string();
+                best_score = new_score;
+            }
+        }
+        // self.logger.send(format!("Thread finished: {}, {}", guess, best_score)).unwrap();
+        self.guesser.send((guess, best_score)).unwrap();
+    }
+
+    fn score(&self, guess: &str) -> u32 {
+        let mut score_map = HashMap::new();
+        for (i, c) in guess.chars().enumerate() {
+            let score = score_map.entry(c).or_insert(0);
+            // if a letter has not been guessed, then only award value for its first occurrence
+            if !self.been_guessed(&c) && score == &0 {
+                *score = self.letter_vals[&c][i];
+            } else {
+                // this char has been guessed before
+                if self.letter_vals[&c][i] == 45 {
+                    *score += 45;
+                } else if *score > 0 {
+                    let new_score = (self.letter_vals[&c][i] as f32 / 2.0).round() as u32;
+                    *score += new_score;
+                } else {
+                    *score = self.letter_vals[&c][i];
+                }
+            }
+        }
+
+        score_map.values().fold(0, |acc, score| acc + score)
     }
 }
