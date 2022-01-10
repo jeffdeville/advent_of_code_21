@@ -1,5 +1,4 @@
 use hashbrown::HashMap;
-use rand::Rng;
 use std::sync::mpsc;
 use std::sync::mpsc::{Sender, Receiver};
 use std::thread::{self, JoinHandle};
@@ -25,11 +24,11 @@ impl WordleMaster {
     }
 
     #[inline]
-    pub fn SOLN_WRODS() -> Vec<&'static str> {
+    pub fn SOLN_WORDS() -> Vec<&'static str> {
         SOLN_WORDS.split("\n").map(|x| x.trim()).collect::<Vec<&str>>()
     }
 
-    pub fn new(dict: Option<Vec<&str>>) -> Self {
+    pub fn new(dict: Vec<&str>) -> Self {
         // let mut rng = rand::thread_rng();
         // let target = dict[rng.gen_range(0..dict.len())].to_string();
         let mut letter_vals = HashMap::new();
@@ -72,40 +71,30 @@ impl WordleMaster {
         }
     }
 
-    pub fn run(&mut self, target: &str, tx_logger: Option<Sender<String>>) {
-        let target_clone = target.to_string();
-        // self.target = target.to_string();
+    pub fn run(&mut self, target: &str, tx_logger: Sender<String>) {
         let (tx_guess, rx_guess): (Sender<(String, u32)>, Receiver<(String, u32)>) = mpsc::channel();
-
-        // let dict = self.dict.clone();
-        let letter_vals = self.letter_vals.clone();
-        let been_guessed = self.been_guessed.clone();
         let num_threads = 4;
-        let dict_chunks = WordleMaster::GUESS_WORDS()
-            .chunks(num_threads);
+        let chunk_size = GUESS_WORDS.split("\n").count() / num_threads;
 
         loop {
-            // for each CPU, split the dictionary into equal sizes, and then score them. - This would require sharing the scoring stuff though.
+            tx_logger.send("looping".to_string()).unwrap();
 
-            // the problem is that when I split the dictionary, or even when I clone it, it's not really duping the dictionary
-            // it must be creating slices to the old memory. I need the dict to disappear entirely.
-            // to do this, I need to learn how strings and vectors will copy / clone
-            // then figure out how to truly make that happen. Either that, or I need to assure the compiler that these threads
-            // will not outlive my function or scope.
-            dict_chunks
-                .map(|&dict_portion| {
+            GUESS_WORDS
+            .split("\n")
+            .map(|x| x.trim())
+            .collect::<Vec<&str>>()
+            .chunks(chunk_size)
+            .map(|dict| dict.to_vec())
+            .map(|dict| {
                     let worker_guesser = tx_guess.clone();
+                    let target_clone = target.to_string();
+                    let thread_logger = tx_logger.clone();
+                    let letter_vals = self.letter_vals.clone();
+                    let been_guessed = self.been_guessed.clone();
+
                     thread::spawn(move || {
-                        let mut best_score = 0;
-                        let mut guess: String = String::new();
-                        for word in dict_portion {
-                            let new_score = 20;
-                            if new_score > best_score {
-                                guess = word.to_string();
-                                best_score = new_score;
-                            }
-                        }
-                        worker_guesser.send((guess, best_score)).unwrap();
+                        let worker =  WordleSlave::new(target_clone, dict, letter_vals, been_guessed, thread_logger, worker_guesser);
+                        worker.run();
                     })
                 })
                 .for_each(|handle| handle.join().unwrap());
@@ -134,40 +123,34 @@ impl WordleMaster {
 
                 }
             }
+
+
         }
     }
 
     pub fn guess(&mut self, guess: &str) -> Option<String> {
-        if !self.dict.contains(&guess.to_string()){
+        if !WordleMaster::SOLN_WORDS().contains(&guess) {
             return None;
         }
-        self.num_guesses += 1;
-        for worker in self.workers.iter_mut() {
-            if worker.guess(guess).is_some() { return Some(guess.to_string()) }
-        }
-        None
-    }
 
-    pub fn score(&self, guess: &str) -> u32 {
-        self.workers.first().unwrap().score(guess)
+        None
     }
 }
 
 #[derive(Debug, Clone)]
 struct WordleSlave {
     target: String,
-    dict: Vec<String>,
+    dict: Vec<&'static str>,
     letter_vals: HashMap<char, Vec<u32>>,
     been_guessed: HashMap<char, bool>,
+    logger: Sender<String>,
+    guesser: Sender<(String, u32)>,
 }
 
 impl WordleSlave {
-    fn new(target: &str, dict: Vec<String>, letter_vals: HashMap<char, Vec<u32>>, been_guessed: HashMap<char, bool>) -> Self {
+    fn new(target: String, dict: Vec<&'static str>, letter_vals: HashMap<char, Vec<u32>>, been_guessed: HashMap<char, bool>, logger: Sender<String>, guesser: Sender<(String, u32)>) -> Self {
         Self {
-            target: target.to_string(),
-            dict: dict,
-            letter_vals: letter_vals,
-            been_guessed: been_guessed,
+            target, dict, letter_vals, been_guessed, logger, guesser,
         }
     }
 
@@ -175,8 +158,19 @@ impl WordleSlave {
         *self.been_guessed.get(char).unwrap_or(&false)
     }
 
-    fn set_target(&mut self, target: &str) {
-        self.target = target.to_string();
+    fn run(&self) -> () {
+        let mut best_score = 0;
+        let mut guess: String = String::new();
+        println!("Thread Stuff: {:?}", self.letter_vals);
+        for word in self.dict.iter() {
+            let new_score = self.score(word);
+            if new_score > best_score {
+                guess = word.to_string();
+                best_score = new_score;
+            }
+        }
+        self.logger.send(format!("Thread finished: {}, {}", guess, best_score)).unwrap();
+        self.guesser.send((guess, best_score)).unwrap();
     }
 
     fn score(&self, guess: &str) -> u32 {
@@ -185,6 +179,7 @@ impl WordleSlave {
             let score = score_map.entry(c).or_insert(0);
             // if a letter has not been guessed, then only award value for its first occurrence
             if !self.been_guessed(&c) && score == &0 {
+                println!("checking: {} of {}", c, guess);
                 *score = self.letter_vals[&c][i];
             } else {
                 // this char has been guessed before
@@ -210,16 +205,16 @@ impl WordleSlave {
         score_map.values().fold(0, |acc, score| acc + score)
     }
 
-    fn guess(&mut self, guess: &str) -> Option<String> {
-        // println!("{}: {}", guess, self.score(guess));
-        // self.num_guesses += 1;
-        if self.target == guess {
-            Some(guess.to_string())
-        } else {
-            self.update_scoring(guess);
-            None
-        }
-    }
+    // fn guess(&mut self, guess: &str) -> Option<String> {
+    //     // println!("{}: {}", guess, self.score(guess));
+    //     // self.num_guesses += 1;
+    //     if self.target == guess {
+    //         Some(guess.to_string())
+    //     } else {
+    //         self.update_scoring(guess);
+    //         None
+    //     }
+    // }
 
     fn set_guessed(&mut self, char: &char) {
         if !self.been_guessed.contains_key(char) {
