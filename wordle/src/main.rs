@@ -2,6 +2,7 @@ use wordle::{WordleMaster};
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
+use lazy_static::lazy_static;
 
 fn setup_logging() -> (Sender<String>, JoinHandle<()>) {
     let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
@@ -14,10 +15,12 @@ fn setup_logging() -> (Sender<String>, JoinHandle<()>) {
     (tx, logger_handle)
 }
 
+lazy_static! {
+    static ref DICT: Vec<&'static str> = include_str!("../words.txt").split("\n").map(|x| x.trim()).collect::<Vec<&'static str>>();
+    static ref DICT_STRING: Vec<String> = DICT.iter().map(|x| x.to_string()).collect::<Vec<String>>();
+}
+
 fn main() {
-    let lines = include_str!("../words.txt").to_string();
-    let dict = lines.split("\n").map(|x| x.trim()).collect::<Vec<&str>>();
-    let dict_copy = dict.clone();
     let solution_lines = include_str!("../wordlist_solutions.txt").to_string();
     let solution_dict = solution_lines.split("\n").map(|x| x.trim()).collect::<Vec<&str>>();
 
@@ -26,9 +29,9 @@ fn main() {
 
     let mut guesses_required: Vec<u32> = Vec::new();
     for current_round in 0..solution_dict.len() {
-        let mut wordle = WordleMaster::new(dict.clone());
+        let mut wordle = WordleMaster::new(DICT.clone());
         let tx_logger = tx.clone();
-        wordle.run(solution_dict[current_round], Some(tx_logger));
+        wordle.run(&DICT_STRING, solution_dict[current_round], Some(tx_logger));
     }
     let total_guesses = guesses_required.iter().sum::<u32>();
     println!("Avg Guesses: {}", total_guesses as f32 / solution_dict.len() as f32);
