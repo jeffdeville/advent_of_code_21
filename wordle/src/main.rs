@@ -17,7 +17,6 @@ fn setup_logging() -> (Sender<String>, JoinHandle<()>) {
 
 lazy_static! {
     static ref DICT: Vec<&'static str> = include_str!("../words.txt").split("\n").map(|x| x.trim()).collect::<Vec<&'static str>>();
-    static ref DICT_STRING: Vec<String> = DICT.iter().map(|x| x.to_string()).collect::<Vec<String>>();
 }
 
 fn main() {
@@ -29,9 +28,9 @@ fn main() {
 
     let mut guesses_required: Vec<u32> = Vec::new();
     for current_round in 0..solution_dict.len() {
-        let mut wordle = WordleMaster::new(DICT.clone());
+        let mut wordle = WordleMaster::new(&DICT);
         let tx_logger = tx.clone();
-        wordle.run(&DICT_STRING, solution_dict[current_round], Some(tx_logger));
+        wordle.run(&DICT, solution_dict[current_round], Some(tx_logger));
     }
     let total_guesses = guesses_required.iter().sum::<u32>();
     println!("Avg Guesses: {}", total_guesses as f32 / solution_dict.len() as f32);

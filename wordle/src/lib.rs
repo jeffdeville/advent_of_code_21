@@ -15,7 +15,7 @@ pub struct WordleMaster {
 }
 
 impl WordleMaster {
-    pub fn new(dict: Vec<&str>) -> Self {
+    pub fn new(dict: &'static Vec<&str>) -> Self {
         let mut rng = rand::thread_rng();
         let target = dict[rng.gen_range(0..dict.len())].to_string();
         let mut letter_vals = HashMap::new();
@@ -56,7 +56,7 @@ impl WordleMaster {
         }
     }
 
-    pub fn run(&mut self, dict: &'static Vec<String>, target: &str, tx_logger: Option<Sender<String>>) {
+    pub fn run(&mut self, dict: &'static Vec<&str>, target: &str, tx_logger: Option<Sender<String>>) {
         let target_clone = target.to_string();
         // self.target = target.to_string();
         let (tx_guess, rx_guess): (Sender<(String, u32)>, Receiver<(String, u32)>) = mpsc::channel();
@@ -117,8 +117,8 @@ impl WordleMaster {
         }
     }
 
-    pub fn guess(&mut self, dict: &'static Vec<String>, guess: &str) -> Option<String> {
-        if !dict.contains(&guess.to_string()){
+    pub fn guess(&mut self, dict: &'static Vec<&str>, guess: &str) -> Option<String> {
+        if !dict.contains(&&&guess) {
             return None;
         }
         self.num_guesses += 1;
