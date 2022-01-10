@@ -118,7 +118,7 @@ impl WordleMaster {
     }
 
     pub fn guess(&mut self, dict: &'static Vec<&str>, guess: &str) -> Option<String> {
-        if !dict.contains(&&&guess) {
+        if !dict.contains(&guess) {
             return None;
         }
         self.num_guesses += 1;
