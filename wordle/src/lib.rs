@@ -7,7 +7,7 @@ use std::thread::{self, JoinHandle};
 #[derive(Debug)]
 pub struct WordleMaster {
     target: String,
-    dict: Vec<String>,
+    // dict: Vec<String>,
     guesses: Vec<String>,
     pub num_guesses: u32,
     workers: Vec<WordleSlave>,
@@ -15,10 +15,23 @@ pub struct WordleMaster {
     been_guessed: HashMap<char, bool>,
 }
 
+static GUESS_WORDS: &str = include_str!("../words.txt");
+static SOLN_WORDS: &str = include_str!("../wordlist_solutions.txt");
+
 impl WordleMaster {
-    pub fn new(dict: Vec<&str>) -> Self {
-        let mut rng = rand::thread_rng();
-        let target = dict[rng.gen_range(0..dict.len())].to_string();
+    #[inline]
+    pub fn GUESS_WORDS() -> Vec<&'static str> {
+        GUESS_WORDS.split("\n").map(|x| x.trim()).collect::<Vec<&str>>()
+    }
+
+    #[inline]
+    pub fn SOLN_WRODS() -> Vec<&'static str> {
+        SOLN_WORDS.split("\n").map(|x| x.trim()).collect::<Vec<&str>>()
+    }
+
+    pub fn new(dict: Option<Vec<&str>>) -> Self {
+        // let mut rng = rand::thread_rng();
+        // let target = dict[rng.gen_range(0..dict.len())].to_string();
         let mut letter_vals = HashMap::new();
         letter_vals.insert('a',vec![10; 5]);
         letter_vals.insert('b',vec![3; 5]);
@@ -50,9 +63,10 @@ impl WordleMaster {
         let mut been_guessed: HashMap<char, bool> = HashMap::new();
 
         Self {
-            target, letter_vals, been_guessed,
+            target: "".to_string(),
+            letter_vals, been_guessed,
             guesses: Vec::new(),
-            dict: dict.iter().map(|x| x.to_string()).collect(),
+            // dict: dict.iter().map(|x| x.to_string()).collect(),
             num_guesses: 0,
             workers: Vec::new(),
         }
@@ -63,25 +77,28 @@ impl WordleMaster {
         // self.target = target.to_string();
         let (tx_guess, rx_guess): (Sender<(String, u32)>, Receiver<(String, u32)>) = mpsc::channel();
 
-        let dict = self.dict.clone();
+        // let dict = self.dict.clone();
         let letter_vals = self.letter_vals.clone();
         let been_guessed = self.been_guessed.clone();
         let num_threads = 4;
+        let dict_chunks = WordleMaster::GUESS_WORDS()
+            .chunks(num_threads);
+
         loop {
             // for each CPU, split the dictionary into equal sizes, and then score them. - This would require sharing the scoring stuff though.
-            let mut guess: String = String::new();
+
             // the problem is that when I split the dictionary, or even when I clone it, it's not really duping the dictionary
             // it must be creating slices to the old memory. I need the dict to disappear entirely.
             // to do this, I need to learn how strings and vectors will copy / clone
             // then figure out how to truly make that happen. Either that, or I need to assure the compiler that these threads
             // will not outlive my function or scope.
-            dict.chunks(num_threads)
-                .map(|dict_portion| {
+            dict_chunks
+                .map(|&dict_portion| {
                     let worker_guesser = tx_guess.clone();
                     thread::spawn(move || {
                         let mut best_score = 0;
+                        let mut guess: String = String::new();
                         for word in dict_portion {
-
                             let new_score = 20;
                             if new_score > best_score {
                                 guess = word.to_string();
