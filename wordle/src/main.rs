@@ -16,7 +16,10 @@ fn setup_logging() -> (Sender<String>, JoinHandle<()>) {
 }
 
 lazy_static! {
-    static ref DICT: Vec<&'static str> = include_str!("../words.txt").split("\n").map(|x| x.trim()).collect::<Vec<&str>>();
+    static ref DICT: Vec<&'static str> = {
+        let lines = include_str!("../words.txt").split("\n");
+        lines.map(|x| x.trim()).collect::<Vec<&str>>()
+    };
 }
 
 fn main() {
