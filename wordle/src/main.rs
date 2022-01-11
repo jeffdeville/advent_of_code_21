@@ -17,7 +17,7 @@ fn setup_logging() -> (Sender<String>, JoinHandle<()>) {
 fn main() {
     let solution_lines = include_str!("../wordlist_solutions.txt").to_string();
     let solution_dict = solution_lines.split("\n").map(|x| x.trim()).collect::<Vec<&str>>();
-
+    // let solution_dict = vec!["query"];
     let (tx, logger_handle) = setup_logging();
 
     let mut guesses_required: Vec<u32> = Vec::new();
