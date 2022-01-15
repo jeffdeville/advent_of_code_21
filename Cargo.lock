@@ -40,7 +40,7 @@ name = "day5"
 version = "0.1.0"
 dependencies = [
  "hashbrown",
- "itertools",
+ "itertools 0.10.3",
 ]
 
 [[package]]
@@ -67,6 +67,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
 dependencies = [
  "ahash",
+]
+
+[[package]]
+name = "itertools"
+version = "0.7.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d47946d458e94a1b7bcabbf6521ea7c037062c81f534615abcad76e84d4970d"
+dependencies = [
+ "either",
 ]
 
 [[package]]
@@ -153,5 +162,6 @@ name = "wordle"
 version = "0.1.0"
 dependencies = [
  "hashbrown",
+ "itertools 0.7.11",
  "rand",
 ]

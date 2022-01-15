@@ -1,217 +1,231 @@
 use hashbrown::HashMap;
-use std::sync::mpsc;
-use std::sync::mpsc::{Sender, Receiver};
-use std::thread;
+use strategies::Strategy;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread::{self, JoinHandle};
 
-#[derive(Debug)]
-pub struct WordleMaster {
-    guesses: Vec<String>,
-    pub num_guesses: u32,
-    workers: Vec<WordleSlave>,
-    letter_vals: HashMap<char, Vec<u32>>,
-    been_guessed: HashMap<char, bool>,
-}
+mod strategies;
 
-static GUESS_WORDS: &str = include_str!("../words.txt");
-static SOLN_WORDS: &str = include_str!("../wordlist_solutions.txt");
+use crate::strategies::choose_strategy;
 
-impl WordleMaster {
-    pub fn new() -> Self {
-        let mut letter_vals = HashMap::new();
-        letter_vals.insert('a',vec![10; 5]);
-        letter_vals.insert('b',vec![3; 5]);
-        letter_vals.insert('c',vec![3; 5]);
-        letter_vals.insert('d',vec![5; 5]);
-        letter_vals.insert('e',vec![10; 5]);
-        letter_vals.insert('f',vec![3; 5]);
-        letter_vals.insert('g',vec![5; 5]);
-        letter_vals.insert('h',vec![3; 5]);
-        letter_vals.insert('i',vec![10; 5]);
-        letter_vals.insert('j',vec![1; 5]);
-        letter_vals.insert('k',vec![2; 5]);
-        letter_vals.insert('l',vec![10; 5]);
-        letter_vals.insert('m',vec![3; 5]);
-        letter_vals.insert('n',vec![10; 5]);
-        letter_vals.insert('o',vec![10; 5]);
-        letter_vals.insert('p',vec![3; 5]);
-        letter_vals.insert('q',vec![1; 5]);
-        letter_vals.insert('r',vec![10; 5]);
-        letter_vals.insert('s',vec![10; 5]);
-        letter_vals.insert('t',vec![10; 5]);
-        letter_vals.insert('u',vec![10; 5]);
-        letter_vals.insert('v',vec![3; 5]);
-        letter_vals.insert('w',vec![3; 5]);
-        letter_vals.insert('x',vec![1; 5]);
-        letter_vals.insert('y',vec![3; 5]);
-        letter_vals.insert('z',vec![1; 5]);
+pub struct Wordle {}
 
-        let been_guessed: HashMap<char, bool> = HashMap::new();
-
-        Self {
-            letter_vals, been_guessed,
-            guesses: Vec::new(),
-            num_guesses: 0,
-            workers: Vec::new(),
-        }
-    }
-
+impl Wordle {
     #[inline]
     pub fn GUESS_WORDS() -> Vec<&'static str> {
-        GUESS_WORDS.split("\n").map(|x| x.trim()).collect::<Vec<&str>>()
-    }
-
-    pub fn run(&mut self, target: &str, tx_logger: Sender<String>) {
-        let num_threads = 4;
-        let chunk_size = GUESS_WORDS.split("\n").count() / num_threads;
-        println!("Target Word: {}", target);
-        loop {
-            let (tx_guess, rx_guess): (Sender<(String, u32)>, Receiver<(String, u32)>) = mpsc::channel();
-
-            GUESS_WORDS
+        GUESS_WORDS
             .split("\n")
             .map(|x| x.trim())
             .collect::<Vec<&str>>()
+    }
+
+    fn split_dict() -> Vec<Vec<&'static str>> {
+        let guess_words = GUESS_WORDS
+            .split("\n")
+            .map(|x| x.trim())
+            .collect::<Vec<&str>>();
+        let chunk_size = guess_words.len() / NUM_THREADS;
+        guess_words
             .chunks(chunk_size)
             .map(|dict| dict.to_vec())
-            .map(|dict| {
-                    let worker_guesser = tx_guess.clone();
-                    let target_clone = target.to_string();
-                    let thread_logger = tx_logger.clone();
-                    let letter_vals = self.letter_vals.clone();
-                    let been_guessed = self.been_guessed.clone();
+            .collect::<Vec<Vec<&'static str>>>()
+    }
 
-                    thread::spawn(move || {
-                        let worker =  WordleSlave::new(target_clone, dict, letter_vals, been_guessed, thread_logger, worker_guesser);
-                        worker.run();
-                    })
-                })
-                .for_each(|handle| handle.join().unwrap());
+    pub fn run(game: WordleGame, tx_logger: Sender<String>) -> u32 {
+        let mut guesses: Vec<String> = Vec::new();
+        let mut num_guesses = 0;
 
-            drop(tx_guess);
-            let (guess, _score) = rx_guess
+        loop {
+            let (tx_guess, rx_guess): (Sender<(String, u32)>, Receiver<(String, u32)>) =
+                mpsc::channel();
+            let strategy = choose_strategy(&game);
+            let scores = strategy.build_scores(&game);
+
+            Wordle::split_dict()
                 .iter()
-                .max_by(|(_, score1), (_, score2)| score1.cmp(score2))
-                .unwrap();
-
-            // println!("Best guess: {} with score {}", guess, score);
-
-            if self.guess(target, &guess).is_some() { break }
+                .map(|dict| Wordle::run_worker(*dict, strategy, &game, &scores, &tx_guess, &tx_logger))
+                .for_each(|handle| handle.join().unwrap());
+            drop(tx_guess);
+            let guess = Wordle::get_best_guess(&rx_guess);
+            if game.guess(guess) {
+                break;
+            }
         }
+
+        println!("{} guesses", num_guesses );
+        num_guesses
     }
 
-    pub fn guess(&mut self, target: &str, guess: &str) -> Option<String> {
-        if !WordleMaster::GUESS_WORDS().contains(&guess) {
-            println!("Hmmm... {}", guess);
+    fn run_worker(
+        dict: Vec<&'static str>,
+        strategy: impl Strategy + Clone + Send,
+        game: &WordleGame,
+        scores: &WordleScores,
+        tx_guess: &Sender<(String, u32)>,
+        tx_logger: &Sender<String>,
+    ) -> JoinHandle<()> {
+        let worker_guesser = tx_guess.clone();
+        let thread_logger = tx_logger.clone();
+        let game_clone = game.clone();
+        let scores_clone = scores.clone();
+        let strategy_clone = strategy.clone();
 
-            return None;
-        }
-        self.num_guesses += 1;
-
-        println!("Target: {}, Guess: {}, GuessNum: {}", target, guess, self.num_guesses);
-        if target == guess {
-            println!("    {}", self.num_guesses);
-            return Some(guess.to_string());
-        }
-        self.update_scoring(target, guess);
-        None
-    }
-
-    fn set_guessed(&mut self, char: &char) {
-        if !self.been_guessed.contains_key(char) {
-            self.been_guessed.insert(*char, true);
-        }
-    }
-
-    fn update_scoring(&mut self, target: &str, guess: &str) {
-        let target_chars = target.chars().collect::<Vec<char>>();
-        // update scoring
-        guess
-            .chars()
-            .enumerate()
-            .for_each(|(guess_index, guess_char)| {
-                self.set_guessed(&guess_char);
-                let scores = self.letter_vals.get_mut(&guess_char).unwrap();
-                if target_chars[guess_index] == guess_char {
-                    for letter_scores_index in 0..scores.len() {
-                        if letter_scores_index == guess_index {
-                            scores[letter_scores_index] = 45;
-                        } else if scores[letter_scores_index] < 15 && scores[letter_scores_index] > 0 {
-                            scores[letter_scores_index] = 15;
-                        }
-                    }
-                } else if target_chars.contains(&guess_char) {
-                    for letter_scores_index in 0..scores.len() {
-                        if letter_scores_index == guess_index {
-                            // println!("UPDATE SCORING - guess_char: {} guess_index{} this score:{}", guess_char, guess_index, scores[letter_scores_index]);
-                            scores[letter_scores_index] = 0;
-                        } else if scores[letter_scores_index] < 15 && scores[letter_scores_index] > 0 {
-                            scores[letter_scores_index] = 15;
-                        }
-                    }
-                } else {
-                    // clear out the score entirely
-                    *scores = vec![0; 5];
+        thread::spawn(move || {
+            let mut best_score = 0;
+            let mut guess: String = String::new();
+            for word in dict.iter() {
+                let new_score = strategy_clone.score(word, &game_clone, &scores_clone);
+                if new_score > best_score {
+                    guess = word.to_string();
+                    best_score = new_score;
                 }
-            });
+            }
+            worker_guesser.send((guess, best_score)).unwrap();
+        })
+    }
+
+    fn get_best_guess(receiver: &Receiver<(String, u32)>) -> String {
+        let (guess, _) = receiver
+            .iter()
+            .max_by(|(_, s1), (_, s2)| s1.cmp(s2))
+            .unwrap();
+        guess
+    }
+}
+
+static NUM_THREADS: usize = 4;
+static GUESS_WORDS: &str = include_str!("../words.txt");
+static SOLN_WORDS: &str = include_str!("../wordlist_solutions.txt");
+
+#[derive(Debug, Clone)]
+pub enum LetterInfo {
+    Unknown,
+    Missing,
+    ExistsSomewhere(Vec<usize>),
+    ExistsAt(Vec<usize>, Vec<usize>),
+}
+
+#[derive(Debug, Clone)]
+pub struct WordleGame {
+    pub game: HashMap<char, LetterInfo>,
+    pub guesses: Vec<String>,
+    pub target: String,
+}
+
+impl WordleGame {
+    pub fn new(target: String) -> Self {
+        let mut default_game = HashMap::new();
+        for char in "abcdefghijklmnopqrstuvwxyz".chars() {
+            default_game.insert(char, LetterInfo::Unknown);
+        }
+
+        WordleGame {
+            target,
+            game: default_game,
+            guesses: Vec::new(),
+        }
+    }
+
+    pub fn guess(&mut self, guess: String) -> bool {
+        false
+    }
+
+    pub fn unknowns(&self) -> impl Iterator<Item = char> + '_ {
+        self.game.iter().filter_map(|(k, v)| {
+            if let LetterInfo::Unknown = v {
+                Some(*k)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn exists_ats(&self) -> impl Iterator<Item = (char, Vec<usize>, Vec<usize>)> + '_ {
+        self.game
+            .iter()
+            .filter_map(|(char, letter_info)| match letter_info {
+                LetterInfo::ExistsAt(exists, may_exist) => {
+                    Some((*char, exists.clone(), may_exist.clone()))
+                }
+                _ => None,
+            })
+    }
+
+    pub fn exists_somewheres(&self) -> impl Iterator<Item = (char, Vec<usize>)> + '_ {
+        self.game
+            .iter()
+            .filter_map(|(char, letter_info)| match letter_info {
+                LetterInfo::ExistsSomewhere(indices) => Some((*char, indices.clone())),
+                _ => None,
+            })
     }
 }
 
 #[derive(Debug, Clone)]
-struct WordleSlave {
-    target: String,
-    dict: Vec<&'static str>,
-    letter_vals: HashMap<char, Vec<u32>>,
-    been_guessed: HashMap<char, bool>,
-    logger: Sender<String>,
-    guesser: Sender<(String, u32)>,
+struct WordleScores {
+    letter_scores: HashMap<char, Vec<u32>>,
 }
 
-impl WordleSlave {
-    fn new(target: String, dict: Vec<&'static str>, letter_vals: HashMap<char, Vec<u32>>, been_guessed: HashMap<char, bool>, logger: Sender<String>, guesser: Sender<(String, u32)>) -> Self {
+impl WordleScores {
+    pub fn new() -> Self {
+        let mut letter_scores: HashMap<char, Vec<u32>> = HashMap::new();
+        letter_scores.insert('b', vec![3; 5]);
+        letter_scores.insert('a', vec![10; 5]);
+        letter_scores.insert('d', vec![5; 5]);
+        letter_scores.insert('c', vec![3; 5]);
+        letter_scores.insert('f', vec![3; 5]);
+        letter_scores.insert('e', vec![10; 5]);
+        letter_scores.insert('h', vec![3; 5]);
+        letter_scores.insert('g', vec![5; 5]);
+        letter_scores.insert('j', vec![1; 5]);
+        letter_scores.insert('i', vec![10; 5]);
+        letter_scores.insert('l', vec![10; 5]);
+        letter_scores.insert('k', vec![2; 5]);
+        letter_scores.insert('n', vec![10; 5]);
+        letter_scores.insert('m', vec![3; 5]);
+        letter_scores.insert('p', vec![3; 5]);
+        letter_scores.insert('o', vec![10; 5]);
+        letter_scores.insert('r', vec![10; 5]);
+        letter_scores.insert('q', vec![1; 5]);
+        letter_scores.insert('t', vec![10; 5]);
+        letter_scores.insert('s', vec![10; 5]);
+        letter_scores.insert('v', vec![3; 5]);
+        letter_scores.insert('u', vec![10; 5]);
+        letter_scores.insert('x', vec![1; 5]);
+        letter_scores.insert('w', vec![3; 5]);
+        letter_scores.insert('z', vec![1; 5]);
+        letter_scores.insert('y', vec![3; 5]);
 
-        Self {
-            target, dict, letter_vals, been_guessed, logger, guesser,
+        WordleScores { letter_scores }
+    }
+
+    pub fn zeros() -> Self {
+        let mut letter_scores: HashMap<char, Vec<u32>> = HashMap::new();
+        for char in "abcdefghijklmnopqrstuvwxyz".chars() {
+            letter_scores.insert(char, vec![0; 5]);
         }
+        WordleScores { letter_scores }
     }
 
-    fn been_guessed(&self, char: &char) -> bool {
-        *self.been_guessed.get(char).unwrap_or(&false)
+    pub fn set_char_column_score(&mut self, char: char, col_index: usize, score: u32) -> () {
+        self.letter_scores.get_mut(&char).unwrap()[col_index] = score;
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_wordle_game_new() {
+        let game = WordleGame::new("guess".to_string());
+        assert_eq!(game.target, "guess");
     }
 
-    fn run(&self) -> () {
-        let mut best_score = 0;
-        let mut guess: String = String::new();
-        for word in self.dict.iter() {
-            let new_score = self.score(word);
-            if new_score > best_score {
-                guess = word.to_string();
-                best_score = new_score;
-            }
-        }
-        // self.logger.send(format!("Thread finished: {}, {}", guess, best_score)).unwrap();
-        self.guesser.send((guess, best_score)).unwrap();
-    }
+    // #[test]
+    // fn test_wordle_game_choose_strategy() {
+    //     let game = WordleGame::new("guess".to_string());
+    //     assert_eq!(game.choose_strategy(), "random");
+    // }
 
-    fn score(&self, guess: &str) -> u32 {
-        let mut score_map = HashMap::new();
-        for (i, c) in guess.chars().enumerate() {
-            let score = score_map.entry(c).or_insert(0);
-            // if a letter has not been guessed, then only award value for its first occurrence
-            if !self.been_guessed(&c) && score == &0 {
-                *score = self.letter_vals[&c][i];
-            } else {
-                // this char has been guessed before
-                if self.letter_vals[&c][i] == 45 {
-                    *score += 45;
-                } else if *score > 0 {
-                    let new_score = (self.letter_vals[&c][i] as f32 / 2.0).round() as u32;
-                    *score += new_score;
-                } else {
-                    *score = self.letter_vals[&c][i];
-                }
-            }
-        }
-
-        score_map.values().fold(0, |acc, score| acc + score)
-    }
+    #[test]
+    fn test_wordle_game_update_game() {}
 }

@@ -1,4 +1,3 @@
-use wordle::{WordleMaster};
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
@@ -24,7 +23,9 @@ fn main() {
     for current_round in 0..solution_dict.len() {
         let mut wordle = WordleMaster::new();
         let tx_logger = tx.clone();
-        wordle.run(solution_dict[current_round], tx_logger);
+        println!("Target Word: {}", solution_dict[current_round]);
+        guesses_required.push(wordle.run(solution_dict[current_round], tx_logger));
+        println!("Num Guesses: {}", guesses_required.last().unwrap());
     }
     let total_guesses = guesses_required.iter().sum::<u32>();
     println!("Avg Guesses: {}", total_guesses as f32 / solution_dict.len() as f32);
