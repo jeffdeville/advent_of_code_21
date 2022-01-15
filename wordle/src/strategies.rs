@@ -6,17 +6,12 @@
 // send custom for each struct though. Ill have to look into that.
 // *********************************************
 
-
-
-
-
-
 use super::*;
 use itertools::Itertools;
 
 pub trait Strategy {
-    fn build_scores(self, game: &WordleGame) -> WordleScores;
-    fn score(self, word: &str, game: &WordleGame, scores: &WordleScores) -> u32;
+    fn build_scores(&self, game: &WordleGame) -> WordleScores;
+    fn score(&self, word: &str, game: &WordleGame, scores: &WordleScores) -> u32;
 }
 
 pub enum GuessStrategy {
@@ -40,7 +35,7 @@ pub fn choose_strategy(game: &WordleGame) -> impl Strategy+Clone+Send {
 #[derive(Clone)]
 struct Mode1Strategy {}
 impl Strategy for Mode1Strategy {
-    fn build_scores(self, game: &WordleGame) -> WordleScores {
+    fn build_scores(&self, game: &WordleGame) -> WordleScores {
         use LetterInfo::*;
         let mut scores = WordleScores::new();
         for (letter, letter_info) in game.game.iter() {
@@ -52,17 +47,18 @@ impl Strategy for Mode1Strategy {
         scores
     }
 
-    fn score(self, word: &str, game: &WordleGame, scores: &WordleScores) -> u32 {
+    fn score(&self, word: &str, game: &WordleGame, scores: &WordleScores) -> u32 {
         let letter_scores = word
             .chars()
             .enumerate()
             .map(|(ind, c)| (c, scores.letter_scores.get(&c).unwrap()[ind]));
         letter_scores
-            .unique_by(|(char, _)| char)
+            .unique_by(|(char, _)| *char)
             .map(|(_, val)| val)
             .sum()
     }
 }
+unsafe impl Send for Mode1Strategy {}
 
 struct Mode2Strategy {}
 impl Mode2Strategy {
@@ -115,12 +111,11 @@ impl Mode3Strategy {
             return 0;
         }
 
-        let result: i32 = word
+        word
             .chars()
             .enumerate()
             .map(|(ind, char)| scores.letter_scores[&char][ind])
-            .sum();
-        result as u32
+            .sum::<u32>()
     }
 
     fn is_solution_possible(word: &String, game: &WordleGame) -> bool {
@@ -159,13 +154,6 @@ impl Mode3Strategy {
 #[cfg(test)]
 mod test {
     use super::*;
-    #[test]
-    fn test_mode1_strategy_score() {
-        assert_eq!(
-            Mode1Strategy::score(&vec![('a', 1), ('b', 2), ('a', 1), ('d', 4)]),
-            7
-        );
-    }
 
     #[test]
     fn test_mode1_strategy_build_scores() {
@@ -173,11 +161,23 @@ mod test {
         *game.game.get_mut(&'c').unwrap() = LetterInfo::Missing;
         *game.game.get_mut(&'d').unwrap() = LetterInfo::ExistsSomewhere(vec![0]);
         *game.game.get_mut(&'e').unwrap() = LetterInfo::ExistsAt(vec![0], vec![1, 2]);
-        let scores = Mode1Strategy::build_scores(&game);
+        let strat = Mode1Strategy{};
+        let scores = strat.build_scores(&game);
         assert_eq!(scores.letter_scores[&'a'], vec![10; 5]);
         assert_eq!(scores.letter_scores[&'c'], vec![0; 5]);
         assert_eq!(scores.letter_scores[&'d'], vec![0; 5]);
         assert_eq!(scores.letter_scores[&'e'], vec![0; 5]);
+    }
+
+    #[test]
+    fn test_mode1_strategy_score() {
+        let game = WordleGame::new( "guess".to_string() );
+        let strat = Mode1Strategy{};
+        let scores = strat.build_scores(&game);
+        assert_eq!(
+            strat.score(&"guess".to_string(), &game, &scores),
+            35
+        );
     }
 
     #[test]
@@ -214,15 +214,18 @@ mod test {
     #[test]
     fn test_mode3_build_scores() {
         let mut game_board = WordleGame::new("guess".to_string());
+        *game_board.game.get_mut(&'b').unwrap() = LetterInfo::Missing;
         *game_board.game.get_mut(&'c').unwrap() = LetterInfo::ExistsSomewhere(vec![0, 1, 2]);
         *game_board.game.get_mut(&'d').unwrap() = LetterInfo::ExistsAt(vec![0], vec![1, 2]);
         *game_board.game.get_mut(&'e').unwrap() = LetterInfo::ExistsAt(vec![1, 2], vec![4]);
+        *game_board.game.get_mut(&'f').unwrap() = LetterInfo::Unknown;
         let scores = Mode3Strategy::build_scores(&game_board);
 
         assert_eq!(scores.letter_scores[&'b'], vec![0; 5]);
         assert_eq!(scores.letter_scores[&'c'], vec![10, 10, 10, 0, 0]);
-        assert_eq!(scores.letter_scores[&'d'], vec![45, 0, 0, 0, 0]);
-        assert_eq!(scores.letter_scores[&'e'], vec![0, 45, 45, 0, 0]);
+        assert_eq!(scores.letter_scores[&'d'], vec![45, 10, 10, 0, 0]);
+        assert_eq!(scores.letter_scores[&'e'], vec![0, 45, 45, 0, 10]);
+        assert_eq!(scores.letter_scores[&'f'], vec![1; 5]);
     }
 
     #[test]

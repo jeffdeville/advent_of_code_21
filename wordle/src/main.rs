@@ -2,6 +2,8 @@ use std::sync::mpsc::{Sender, Receiver};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
+use wordle::{Wordle, WordleGame};
+
 fn setup_logging() -> (Sender<String>, JoinHandle<()>) {
     let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
     let logger_handle = thread::spawn(move || {
@@ -21,10 +23,12 @@ fn main() {
 
     let mut guesses_required: Vec<u32> = Vec::new();
     for current_round in 0..solution_dict.len() {
-        let mut wordle = WordleMaster::new();
+        // let mut wordle = Wordle::new();
         let tx_logger = tx.clone();
+        let mut game = WordleGame::new(solution_dict[current_round].to_string());
+
         println!("Target Word: {}", solution_dict[current_round]);
-        guesses_required.push(wordle.run(solution_dict[current_round], tx_logger));
+        guesses_required.push(Wordle::run(&mut game, tx_logger));
         println!("Num Guesses: {}", guesses_required.last().unwrap());
     }
     let total_guesses = guesses_required.iter().sum::<u32>();

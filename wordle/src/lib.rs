@@ -2,36 +2,27 @@ use hashbrown::HashMap;
 use strategies::Strategy;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
-
+use lazy_static::lazy_static;
 mod strategies;
 
 use crate::strategies::choose_strategy;
 
-pub struct Wordle {}
-
-impl Wordle {
-    #[inline]
-    pub fn GUESS_WORDS() -> Vec<&'static str> {
-        GUESS_WORDS
+static NUM_THREADS: usize = 4;
+lazy_static! {
+    static ref GUESS_WORDS: Vec<&'static str> = {
+        include_str!("../words.txt")
             .split("\n")
             .map(|x| x.trim())
             .collect::<Vec<&str>>()
-    }
+    };
+}
+// static GUESS_WORDS: &str = include_str!("../words.txt");
+static SOLN_WORDS: &str = include_str!("../wordlist_solutions.txt");
 
-    fn split_dict() -> Vec<Vec<&'static str>> {
-        let guess_words = GUESS_WORDS
-            .split("\n")
-            .map(|x| x.trim())
-            .collect::<Vec<&str>>();
-        let chunk_size = guess_words.len() / NUM_THREADS;
-        guess_words
-            .chunks(chunk_size)
-            .map(|dict| dict.to_vec())
-            .collect::<Vec<Vec<&'static str>>>()
-    }
+pub struct Wordle {}
 
-    pub fn run(game: WordleGame, tx_logger: Sender<String>) -> u32 {
-        let mut guesses: Vec<String> = Vec::new();
+impl Wordle {
+    pub fn run(game: &mut WordleGame, tx_logger: Sender<String>) -> u32 {
         let mut num_guesses = 0;
 
         loop {
@@ -40,15 +31,14 @@ impl Wordle {
             let strategy = choose_strategy(&game);
             let scores = strategy.build_scores(&game);
 
-            Wordle::split_dict()
-                .iter()
-                .map(|dict| Wordle::run_worker(*dict, strategy, &game, &scores, &tx_guess, &tx_logger))
+            (&GUESS_WORDS).chunks(GUESS_WORDS.len() / NUM_THREADS)
+                .map(|dict| Wordle::run_worker(dict, strategy.clone(), &game, &scores, &tx_guess, &tx_logger))
                 .for_each(|handle| handle.join().unwrap());
+
             drop(tx_guess);
             let guess = Wordle::get_best_guess(&rx_guess);
-            if game.guess(guess) {
-                break;
-            }
+            if game.guess(guess) { break; }
+            // num_guesses += 1;
         }
 
         println!("{} guesses", num_guesses );
@@ -56,8 +46,8 @@ impl Wordle {
     }
 
     fn run_worker(
-        dict: Vec<&'static str>,
-        strategy: impl Strategy + Clone + Send,
+        dict: &'static [&str],
+        strategy: impl Strategy + Clone + Send + 'static,
         game: &WordleGame,
         scores: &WordleScores,
         tx_guess: &Sender<(String, u32)>,
@@ -67,13 +57,13 @@ impl Wordle {
         let thread_logger = tx_logger.clone();
         let game_clone = game.clone();
         let scores_clone = scores.clone();
-        let strategy_clone = strategy.clone();
+        // let strategy_clone = strategy.clone();
 
         thread::spawn(move || {
             let mut best_score = 0;
             let mut guess: String = String::new();
             for word in dict.iter() {
-                let new_score = strategy_clone.score(word, &game_clone, &scores_clone);
+                let new_score = strategy.score(word, &game_clone, &scores_clone);
                 if new_score > best_score {
                     guess = word.to_string();
                     best_score = new_score;
@@ -91,10 +81,6 @@ impl Wordle {
         guess
     }
 }
-
-static NUM_THREADS: usize = 4;
-static GUESS_WORDS: &str = include_str!("../words.txt");
-static SOLN_WORDS: &str = include_str!("../wordlist_solutions.txt");
 
 #[derive(Debug, Clone)]
 pub enum LetterInfo {
