@@ -1,11 +1,3 @@
-// *********************************************
-// Left Off - I am trying to clone my strategy to be passed in to
-// the worker thread. But these are just buckets of methods - I should
-// either not need to do that, or I should be able to "Send" the entire
-// thing into the thread, and clone it that way. Rust wants me to impl
-// send custom for each struct though. Ill have to look into that.
-// *********************************************
-
 use super::*;
 use itertools::Itertools;
 
@@ -14,22 +6,21 @@ pub trait Strategy {
     fn score(&self, word: &str, game: &WordleGame, scores: &WordleScores) -> u32;
 }
 
-pub enum GuessStrategy {
-    Mode1,
-    Mode2,
-    Mode3,
-}
-
 // This needs to return something that implements a trait
-pub fn choose_strategy(game: &WordleGame) -> impl Strategy+Clone+Send {
-    Mode1Strategy{}
-    // if self.exists_somewheres().count() >= 3 {
-    //     strategies::GuessStrategy::Mode3
-    // } else if self.exists_ats().fold(0, |acc, (exist_ats, _)| exist_ats.len() + acc).count() >= 3 {
-    //     strategies::GuessStrategy::Mode2
-    // } else {
-    //     strategies::GuessStrategy::Mode1
-    // }
+// pub fn choose_strategy(game: &WordleGame) -> Box<dyn Strategy + Send + Sync> {
+pub fn choose_strategy(game: &WordleGame) -> Box<dyn Strategy>  {
+    let num_letters_positioned = game.exists_ats()
+        .fold(0, |acc, (_, exist_ats, _)| exist_ats.len() + acc);
+    if num_letters_positioned >= 3 {
+            // println!("Using strategy 3");
+            return Box::new(Mode3Strategy{});
+    } else if num_letters_positioned + game.exists_somewheres().count() >= 3 {
+        // println!("Using strategy 2");
+        return Box::new(Mode2Strategy{});
+    } else {
+        // println!("Using strategy 1");
+        return Box::new(Mode1Strategy{});
+    }
 }
 
 #[derive(Clone)]
@@ -47,7 +38,7 @@ impl Strategy for Mode1Strategy {
         scores
     }
 
-    fn score(&self, word: &str, game: &WordleGame, scores: &WordleScores) -> u32 {
+    fn score(&self, word: &str, _game: &WordleGame, scores: &WordleScores) -> u32 {
         let letter_scores = word
             .chars()
             .enumerate()
@@ -60,28 +51,34 @@ impl Strategy for Mode1Strategy {
 }
 unsafe impl Send for Mode1Strategy {}
 
+#[derive(Clone)]
 struct Mode2Strategy {}
-impl Mode2Strategy {
-    pub fn score(scores: &Vec<(char, u32)>, game: &WordleGame) -> u32 {
+impl Strategy for Mode2Strategy {
+    fn score(&self, word: &str, game: &WordleGame, scores: &WordleScores) -> u32 {
+        let letter_scores = word
+            .chars()
+            .enumerate()
+            .map(|(ind, c)| (c, scores.letter_scores.get(&c).unwrap()[ind]));
+
         let mut score: HashMap<char, u32> = HashMap::new();
-        for (char, value) in scores {
+        for (char, value) in letter_scores {
             match &game.game[&char] {
                 LetterInfo::ExistsSomewhere(possible_slots) => {
                     if !score.contains_key(&char) || possible_slots.len() <= 2 {
-                        score.insert(*char, *value);
+                        score.insert(char, value);
                     } else if score.contains_key(&char) && possible_slots.len() > 2 {
                         *score.get_mut(&char).unwrap() += value;
                     }
                 }
                 _ => {
-                    score.insert(*char, *value);
+                    score.insert(char, value);
                 }
             }
         }
         score.values().sum()
     }
 
-    pub fn build_scores(game: &WordleGame) -> WordleScores {
+    fn build_scores(&self, game: &WordleGame) -> WordleScores {
         use LetterInfo::*;
         let mut scores = WordleScores::new();
         for (letter, letter_info) in game.game.iter() {
@@ -104,10 +101,23 @@ impl Mode2Strategy {
     }
 }
 
+#[derive(Clone)]
 struct Mode3Strategy {}
+
 impl Mode3Strategy {
-    pub fn score(word: String, scores: &WordleScores, game: &WordleGame) -> u32 {
-        if !Mode3Strategy::is_solution_possible(&word, game) {
+    fn is_solution_possible(word: &String, game: &WordleGame) -> bool {
+        word.chars()
+            .enumerate()
+            .all(|(ind, char)| match &game.game[&char] {
+                LetterInfo::ExistsSomewhere(possible_slots) => possible_slots.contains(&ind),
+                LetterInfo::Missing => false,
+                _ => true,
+            })
+    }
+}
+impl Strategy for Mode3Strategy {
+    fn score(&self, word: &str, game: &WordleGame, scores: &WordleScores) -> u32 {
+        if !Mode3Strategy::is_solution_possible(&word.to_string(), game) {
             return 0;
         }
 
@@ -118,17 +128,9 @@ impl Mode3Strategy {
             .sum::<u32>()
     }
 
-    fn is_solution_possible(word: &String, game: &WordleGame) -> bool {
-        word.chars()
-            .enumerate()
-            .all(|(ind, char)| match &game.game[&char] {
-                LetterInfo::ExistsSomewhere(possible_slots) => possible_slots.contains(&ind),
-                LetterInfo::Missing => false,
-                _ => true,
-            })
-    }
 
-    pub fn build_scores(game: &WordleGame) -> WordleScores {
+
+    fn build_scores(&self, game: &WordleGame) -> WordleScores {
         let mut scores = WordleScores::zeros();
 
         game.unknowns().for_each(|char| {
@@ -187,7 +189,7 @@ mod test {
         *game.game.get_mut(&'c').unwrap() = LetterInfo::ExistsSomewhere(vec![0, 1, 2]);
         *game.game.get_mut(&'d').unwrap() = LetterInfo::ExistsAt(vec![0], vec![1, 2]);
         *game.game.get_mut(&'e').unwrap() = LetterInfo::ExistsAt(vec![1, 2], vec![4, 5]);
-        let scores = Mode2Strategy::build_scores(&game);
+        let scores = Mode2Strategy{}.build_scores(&game);
 
         assert_eq!(scores.letter_scores[&'b'], vec![3; 5]);
         assert_eq!(scores.letter_scores[&'c'], vec![45, 45, 45, 0, 0]);
@@ -197,17 +199,22 @@ mod test {
 
     #[test]
     fn test_mode2_strategy_score() {
-        let mut game_board = WordleGame::new("guess".to_string());
-        let scores = vec![('g', 1), ('u', 2), ('e', 4), ('s', 5), ('s', 5)];
-        let score = Mode2Strategy::score(&scores, &game_board);
+        let mut game = WordleGame::new("guess".to_string());
+        let strat = Mode2Strategy{};
+        let scores = strat.build_scores(&game);
+        // let scores = vec![('g', 1), ('u', 2), ('e', 4), ('s', 5), ('s', 5)];
+
+        let score = Mode2Strategy{}.score("guess", &game, &scores);
         assert_eq!(score, 12);
 
-        *game_board.game.get_mut(&'s').unwrap() = LetterInfo::ExistsSomewhere(vec![1, 2]);
-        let score = Mode2Strategy::score(&scores, &game_board);
+        *game.game.get_mut(&'s').unwrap() = LetterInfo::ExistsSomewhere(vec![1, 2]);
+        let scores = strat.build_scores(&game);
+        let score = Mode2Strategy{}.score("guess", &game, &scores);
         assert_eq!(score, 12);
 
-        *game_board.game.get_mut(&'s').unwrap() = LetterInfo::ExistsSomewhere(vec![1, 2, 3]);
-        let score = Mode2Strategy::score(&scores, &game_board);
+        *game.game.get_mut(&'s').unwrap() = LetterInfo::ExistsSomewhere(vec![1, 2, 3]);
+        let scores = strat.build_scores(&game);
+        let score = Mode2Strategy{}.score("guess", &game, &scores);
         assert_eq!(score, 17);
     }
 
@@ -219,7 +226,8 @@ mod test {
         *game_board.game.get_mut(&'d').unwrap() = LetterInfo::ExistsAt(vec![0], vec![1, 2]);
         *game_board.game.get_mut(&'e').unwrap() = LetterInfo::ExistsAt(vec![1, 2], vec![4]);
         *game_board.game.get_mut(&'f').unwrap() = LetterInfo::Unknown;
-        let scores = Mode3Strategy::build_scores(&game_board);
+        let strat = Mode3Strategy{};
+        let scores = strat.build_scores(&game_board);
 
         assert_eq!(scores.letter_scores[&'b'], vec![0; 5]);
         assert_eq!(scores.letter_scores[&'c'], vec![10, 10, 10, 0, 0]);
@@ -232,6 +240,7 @@ mod test {
     fn test_mode3_is_solution_possible() {
         let guess = "guess";
         let mut game_board = WordleGame::new(guess.to_string());
+
         assert_eq!(
             Mode3Strategy::is_solution_possible(&guess.to_string(), &game_board),
             true
@@ -264,35 +273,36 @@ mod test {
     fn test_mode3_score() {
         // only score words that fully match, so this is a different algo I think.
         // assert_eq!(Mode3Strategy.score(&scores, &game_board), 100);
-        let mut game_board = WordleGame::new("guess".to_string());
-        let scores = Mode3Strategy::build_scores(&game_board);
+        let mut game = WordleGame::new("guess".to_string());
+        let strat = Mode2Strategy{};
+        let scores = strat.build_scores(&game);
         assert_eq!(
-            Mode3Strategy::score("chats".to_string(), &scores, &game_board),
+            strat.score("chats", &game, &scores),
             5
         );
 
-        game_board
+        game
             .game
             .insert('c', LetterInfo::ExistsSomewhere(vec![0, 1, 2]));
-        let scores = Mode3Strategy::build_scores(&game_board);
+        let scores = strat.build_scores(&game);
         assert_eq!(
-            Mode3Strategy::score("chats".to_string(), &scores, &game_board),
+            strat.score("chats", &game, &scores),
             14
         );
 
-        game_board
+        game
             .game
             .insert('c', LetterInfo::ExistsAt(vec![0], vec![]));
-        let scores = Mode3Strategy::build_scores(&game_board);
+        let scores = strat.build_scores(&game);
         assert_eq!(
-            Mode3Strategy::score("chats".to_string(), &scores, &game_board),
+            strat.score("chats", &game, &scores),
             49
         );
 
-        game_board.game.insert('c', LetterInfo::Missing);
-        let scores = Mode3Strategy::build_scores(&game_board);
+        game.game.insert('c', LetterInfo::Missing);
+        let scores = strat.build_scores(&game);
         assert_eq!(
-            Mode3Strategy::score("chats".to_string(), &scores, &game_board),
+            strat.score("chats", &game, &scores),
             0
         );
     }

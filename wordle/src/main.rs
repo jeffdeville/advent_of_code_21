@@ -18,11 +18,12 @@ fn setup_logging() -> (Sender<String>, JoinHandle<()>) {
 fn main() {
     let solution_lines = include_str!("../wordlist_solutions.txt").to_string();
     let solution_dict = solution_lines.split("\n").map(|x| x.trim()).collect::<Vec<&str>>();
-    // let solution_dict = vec!["query"];
+    // let solution_dict = vec!["evade"];
     let (tx, logger_handle) = setup_logging();
 
-    let mut guesses_required: Vec<u32> = Vec::new();
+    let mut guesses_required: Vec<usize> = Vec::new();
     for current_round in 0..solution_dict.len() {
+        if current_round % 50 == 0 { print_average(&guesses_required); }
         // let mut wordle = Wordle::new();
         let tx_logger = tx.clone();
         let mut game = WordleGame::new(solution_dict[current_round].to_string());
@@ -31,13 +32,16 @@ fn main() {
         guesses_required.push(Wordle::run(&mut game, tx_logger));
         println!("Num Guesses: {}", guesses_required.last().unwrap());
     }
-    let total_guesses = guesses_required.iter().sum::<u32>();
-    println!("Avg Guesses: {}", total_guesses as f32 / solution_dict.len() as f32);
+    print_average(&guesses_required);
 
     drop(tx);
     logger_handle.join().expect("The logger panicked");
 }
 
+fn print_average(guesses_required: &Vec<usize>) {
+    let total_guesses = guesses_required.iter().map(|n| *n as u32).sum::<u32>();
+    println!("<<<<< Avg Guesses: {}", total_guesses as f32 / guesses_required.len() as f32);
+}
 
 // #[test]
 // fn test_score_correct_word() {
